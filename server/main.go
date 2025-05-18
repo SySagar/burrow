@@ -31,27 +31,55 @@ var (
 
 func main() {
 	// control server on TCP port 7835
-	listener, err := net.Listen("tcp", ":7835")
-
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println("Server started on port 7835 (control port)")
-
-	//infinte loop
-	for {
-		conn, err := listener.Accept()
+	go func() {
+		listener, err := net.Listen("tcp", ":7835")
 
 		if err != nil {
-			continue
+			panic(err)
 		}
-		go handleControlConnection(conn)
-	}
+
+		fmt.Println("Server started on port 7835 (control port)")
+
+		//infinte loop
+		for {
+			conn, err := listener.Accept()
+
+			if err != nil {
+				continue
+			}
+			go handleControlConnection(conn)
+		}
+	}()
+
+	// Start data tunnel listener
+	// Data tunnel port (client sends ID <id> to match the incoming connection)
+	go func() {
+		tunnelListener, err := net.Listen("tcp", ":7836")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("Server started on port 7836 (data tunnel port)")
+		for {
+			conn, err := tunnelListener.Accept()
+			if err != nil {
+				continue
+			}
+			go handleClientDataConnection(conn)
+		}
+	}()
+
+	// http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	// 	fmt.Println("➡️ Received request at /")
+	// 	fmt.Fprintln(w, "Hello from your local web server!")
+	// })
+
+	// keep main thread running forever
+	select {}
+
 }
 
 func handleControlConnection(conn net.Conn) {
-	defer conn.Close()
+	// defer conn.Close()
 
 	reader := bufio.NewReader(conn)
 
@@ -83,7 +111,7 @@ func handleControlConnection(conn net.Conn) {
 		mu.Unlock()
 	}
 
-	// Start listening on the public port
+	// Start listening on the public port (for ex 9090)
 	pubListener, err := net.Listen("tcp", fmt.Sprintf(":%d", publicPort))
 	if err != nil {
 		fmt.Fprintln(conn, "ERROR failed to bind public port")
@@ -124,8 +152,11 @@ func handleControlConnection(conn net.Conn) {
 		}
 	}()
 
+	// Block forever to keep controlConn alive
+	select {} // This keeps the goroutine alive and controlConn open
 }
 
+// timeout after 10s from client
 func waitForClientTunnel(publicPort int, connID string, externalConn net.Conn) {
 
 	// Save external connection by ID into map
@@ -148,11 +179,11 @@ func waitForClientTunnel(publicPort int, connID string, externalConn net.Conn) {
 
 }
 
-//	reverse tunnel setup: client to connect back and "claim" a pending connection
+//	reverse tunnel setup: Handles when the client connects back to the server on port 7836
 //
 // CLIENT SENDS : ID abc123\n
 func handleClientDataConnection(conn net.Conn) {
-	defer conn.Close()
+	// defer conn.Close()
 
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadString('\n')
