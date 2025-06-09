@@ -5,10 +5,17 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 )
 
 func main() {
+	if len(os.Args) != 2 {
+		fmt.Println("Usage: client <PORT>")
+		os.Exit(1)
+	}
+	localPort := os.Args[1]
+
 	// 1. Connect to control port
 	controlConn, err := net.Dial("tcp", "localhost:7835")
 	if err != nil {
@@ -16,14 +23,14 @@ func main() {
 	}
 
 	// 2. Send EXPOSE command over the control connection
-	fmt.Fprintf(controlConn, "EXPOSE 5000\n")
+	fmt.Fprintf(controlConn, "EXPOSE %s\n", localPort)
 
 	// 3. Read OK response with public port
 	reader := bufio.NewReader(controlConn)
 	line, _ := reader.ReadString('\n')
 	fmt.Print("Server response: ", line)
 
-	// 4. Listen for CONNECTION <id> [incoming user connections (from server)] messages
+	//4. Listen for CONNECTION <id> [incoming user connections (from server)] messages
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -35,14 +42,13 @@ func main() {
 			connID := strings.TrimSpace(strings.Split(line, " ")[1])
 			fmt.Println("Got connection ID:", connID)
 
-			// 5. Connect to data port and claim the ID
-			go handleTunnel(connID)
+			// connect to data port and claim ID
+			go handleTunnel(connID, localPort)
 		}
 	}
 }
 
-func handleTunnel(connID string) {
-	// Connect to the tunnel data port(7836), which is waiting for tunnel connection
+func handleTunnel(connID, localPort string) {
 	dataConn, err := net.Dial("tcp", "localhost:7836")
 	if err != nil {
 		fmt.Println("Error connecting to data tunnel:", err)
@@ -50,15 +56,14 @@ func handleTunnel(connID string) {
 	}
 	fmt.Fprintf(dataConn, "ID %s\n", connID)
 
-	// Connect to local service (port 5000)
-	localConn, err := net.Dial("tcp", "localhost:5000")
+	localConn, err := net.Dial("tcp", "localhost:"+localPort)
 	if err != nil {
 		fmt.Println("Error connecting to local service:", err)
 		dataConn.Close()
 		return
 	}
 
-	// Pipe both ways
+	//This pipes both ways
 	go io.Copy(dataConn, localConn)
 	go io.Copy(localConn, dataConn)
 }
